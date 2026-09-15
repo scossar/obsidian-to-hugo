@@ -1,8 +1,8 @@
 """Conservative Markdown export; uses Hugo itself to render its archetype."""
+
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime
 import filecmp
 import json
 import re
@@ -12,13 +12,26 @@ import sys
 import tempfile
 import tomllib
 import unicodedata
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 import tomlkit
 import yaml
 
-IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".bmp", ".ico", ".tif", ".tiff"}
+IMAGES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".avif",
+    ".bmp",
+    ".ico",
+    ".tif",
+    ".tiff",
+}
 
 
 def external(target):
@@ -31,7 +44,7 @@ def strip_frontmatter(text):
         marker = lines[0].strip()
         for i, line in enumerate(lines[1:], 1):
             if line.strip() == marker or (marker == "---" and line.strip() == "..."):
-                return "".join(lines[i + 1:]), i + 1
+                return "".join(lines[i + 1 :]), i + 1
         raise ValueError("Unterminated note frontmatter")
     return "".join(lines), 0
 
@@ -42,9 +55,11 @@ def note_metadata(text):
     if not offset:
         return {}
     lines = text.lstrip("\ufeff").splitlines(keepends=True)
-    raw = "".join(lines[1:offset - 1])
+    raw = "".join(lines[1 : offset - 1])
     try:
-        metadata = tomllib.loads(raw) if lines[0].strip() == "+++" else yaml.safe_load(raw)
+        metadata = (
+            tomllib.loads(raw) if lines[0].strip() == "+++" else yaml.safe_load(raw)
+        )
     except (ValueError, yaml.YAMLError) as error:
         raise ValueError(f"Invalid note frontmatter: {error}") from error
     if metadata is None:
@@ -67,7 +82,9 @@ def note_metadata(text):
             if not isinstance(created, date):
                 raise ValueError("Expected a date")
         except ValueError as error:
-            raise ValueError("created_at must be a valid YYYY-MM-DD date or ISO timestamp") from error
+            raise ValueError(
+                "created_at must be a valid YYYY-MM-DD date or ISO timestamp"
+            ) from error
         overrides["date"] = created.isoformat()
     tags = metadata.get("tags")
     if tags is not None:
@@ -85,8 +102,10 @@ def apply_metadata(generated, overrides):
     body, offset = strip_frontmatter(generated)
     lines = generated.lstrip("\ufeff").splitlines(keepends=True)
     if not offset or lines[0].strip() != "+++":
-        raise ValueError("Metadata overrides require TOML (+++) Hugo archetype frontmatter")
-    document = tomlkit.parse("".join(lines[1:offset - 1]))
+        raise ValueError(
+            "Metadata overrides require TOML (+++) Hugo archetype frontmatter"
+        )
+    document = tomlkit.parse("".join(lines[1 : offset - 1]))
     for key, value in overrides.items():
         document[key] = tomlkit.string(value) if isinstance(value, str) else value
     return "+++\n" + tomlkit.dumps(document).rstrip("\n") + "\n+++\n" + body
@@ -101,16 +120,23 @@ def protected(text):
         m = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
         hide = fence is not None or m is not None or line.startswith(("    ", "\t"))
         if fence:
-            if re.match(r"^ {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*$", line):
+            if re.match(
+                r"^ {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*$",
+                line,
+            ):
                 fence = None
         elif m:
             fence = m[1]
         if hide:
-            mask[offset:offset + len(line)] = ["\n" if c == "\n" else " " for c in line]
+            mask[offset : offset + len(line)] = [
+                "\n" if c == "\n" else " " for c in line
+            ]
         offset += len(line)
     masked = "".join(mask)
-    for m in re.finditer(r"<!--.*?(?:-->|\Z)|(`+)(?!`)(.*?)(?<!`)\1(?!`)", masked, re.S):
-        mask[m.start():m.end()] = ["\n" if c == "\n" else " " for c in m[0]]
+    for m in re.finditer(
+        r"<!--.*?(?:-->|\Z)|(`+)(?!`)(.*?)(?<!`)\1(?!`)", masked, re.S
+    ):
+        mask[m.start() : m.end()] = ["\n" if c == "\n" else " " for c in m[0]]
     return "".join(mask)
 
 
@@ -135,8 +161,8 @@ def destination(value):
     value = value.strip()
     if value.startswith("<") and ">" in value:
         end = value.index(">")
-        return value[1:end], value[end + 1:]
-    m = re.match(r'''(.*?)(\s+["'].*["'])\s*$''', value, re.S)
+        return value[1:end], value[end + 1 :]
+    m = re.match(r"""(.*?)(\s+["'].*["'])\s*$""", value, re.S)
     return (m[1], m[2]) if m else (value, "")
 
 
@@ -158,13 +184,25 @@ class Export:
             return target
         decoded = unquote(target)
         roots = [(self.vault / name).resolve() for name in ("assets", "website_assets")]
-        explicit = [(self.note.parent / decoded).resolve(), (self.vault / decoded.lstrip("/")).resolve()]
-        candidates = {p for p in explicit if p.is_file() and any(p.is_relative_to(r) for r in roots)}
+        explicit = [
+            (self.note.parent / decoded).resolve(),
+            (self.vault / decoded.lstrip("/")).resolve(),
+        ]
+        candidates = {
+            p
+            for p in explicit
+            if p.is_file() and any(p.is_relative_to(r) for r in roots)
+        }
         if not candidates:
             for root in roots:
                 if root.is_dir():
-                    candidates.update(p.resolve() for p in root.rglob("*")
-                                      if p.is_file() and p.name == Path(decoded).name and p.resolve().is_relative_to(root))
+                    candidates.update(
+                        p.resolve()
+                        for p in root.rglob("*")
+                        if p.is_file()
+                        and p.name == Path(decoded).name
+                        and p.resolve().is_relative_to(root)
+                    )
         if not candidates:
             raise ValueError(f"Image not found in assets or website_assets: {target}")
         if len(candidates) > 1:
@@ -176,7 +214,9 @@ class Export:
         other = self.copies.get(dest)
         if other and not filecmp.cmp(source, other, shallow=False):
             raise ValueError(f"Different images share the filename {source.name}")
-        if dest.exists() and (not dest.is_file() or not filecmp.cmp(source, dest, shallow=False)):
+        if dest.exists() and (
+            not dest.is_file() or not filecmp.cmp(source, dest, shallow=False)
+        ):
             raise ValueError(f"Refusing to overwrite different image: {dest}")
         self.copies[dest] = source
         return "/images/" + quote(source.name, safe="-._~")
@@ -186,10 +226,13 @@ class Export:
         scan = protected(text)
         refs = {}
         for m in re.finditer(r"^ {0,3}\[([^\]\n]+)\]:[ \t]*(.+)$", scan, re.M):
-            refs.setdefault(normalize(m[1]), destination(text[m.start(2):m.end(2)]))
+            refs.setdefault(normalize(m[1]), destination(text[m.start(2) : m.end(2)]))
             target, _ = refs[normalize(m[1])]
             if not external(target):
-                self.warn(offset + text.count("\n", 0, m.start()) + 1, f"Internal reference definition left unchanged: {target}")
+                self.warn(
+                    offset + text.count("\n", 0, m.start()) + 1,
+                    f"Internal reference definition left unchanged: {target}",
+                )
         edits = []
         i = 0
         while i < len(scan):
@@ -198,54 +241,69 @@ class Export:
                 continue
             embed = scan.startswith("![", i)
             start = i + 1 if embed else i
-            if scan[start:start + 2] == "[[":
+            if scan[start : start + 2] == "[[":
                 end = scan.find("]]", start + 2)
                 if end == -1:
                     i += 1
                     continue
-                target, sep, alias = text[start + 2:end].partition("|")
+                target, sep, alias = text[start + 2 : end].partition("|")
                 line = offset + text.count("\n", 0, i) + 1
                 if embed and Path(unquote(target)).suffix.lower() in IMAGES:
-                    alt = alias if sep and not re.fullmatch(r"\d+(?:x\d+)?", alias) else Path(unquote(target)).stem
-                    alt = alt.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+                    alt = (
+                        alias
+                        if sep and not re.fullmatch(r"\d+(?:x\d+)?", alias)
+                        else Path(unquote(target)).stem
+                    )
+                    alt = (
+                        alt.replace("\\", "\\\\")
+                        .replace("[", "\\[")
+                        .replace("]", "\\]")
+                    )
                     edits.append((i, end + 2, f"![{alt}]({self.image(target)})"))
                     if sep and re.fullmatch(r"\d+(?:x\d+)?", alias):
                         self.warn(line, f"Obsidian image dimensions omitted: {alias}")
                 else:
-                    self.warn(line, f"Internal link/embed left unchanged: {text[i:end + 2]}")
+                    self.warn(
+                        line, f"Internal link/embed left unchanged: {text[i : end + 2]}"
+                    )
                 i = end + 2
                 continue
-            if scan[start:start + 1] != "[":
+            if scan[start : start + 1] != "[":
                 i += 1
                 continue
             end = closing(scan, start, "[", "]")
             if end is None:
                 i += 1
                 continue
-            label = text[start + 1:end]
+            label = text[start + 1 : end]
             after = end + 1
             target = None
             suffix = ""
-            if scan[after:after + 1] == "(":
+            if scan[after : after + 1] == "(":
                 finish = closing(scan, after, "(", ")")
                 if finish is not None:
-                    target, suffix = destination(text[after + 1:finish])
+                    target, suffix = destination(text[after + 1 : finish])
                     after = finish + 1
-            elif scan[after:after + 1] != ":":
+            elif scan[after : after + 1] != ":":
                 ref = label
-                if scan[after:after + 1] == "[":
+                if scan[after : after + 1] == "[":
                     finish = scan.find("]", after + 1)
                     if finish != -1:
-                        ref = text[after + 1:finish] or label
+                        ref = text[after + 1 : finish] or label
                         after = finish + 1
                 if normalize(ref) in refs:
                     target, suffix = refs[normalize(ref)]
             if target is not None:
                 if embed:
                     if not external(target):
-                        edits.append((i, after, f"![{label}]({self.image(target)}{suffix})"))
+                        edits.append(
+                            (i, after, f"![{label}]({self.image(target)}{suffix})")
+                        )
                 elif not external(target):
-                    self.warn(offset + text.count("\n", 0, i) + 1, f"Internal link left unchanged: {target}")
+                    self.warn(
+                        offset + text.count("\n", 0, i) + 1,
+                        f"Internal link left unchanged: {target}",
+                    )
                 # Inspect a link's label too: it may contain a linked image.
                 i = after if embed else start + 1
             else:
@@ -271,7 +329,9 @@ def run(args):
         raise ValueError("Note must be a Markdown file inside the vault")
     if not (site / "archetypes/default.md").is_file():
         raise ValueError(f"Missing Hugo archetype: {site / 'archetypes/default.md'}")
-    slug = re.sub(r"[^\w-]+", "-", unicodedata.normalize("NFKC", note.stem).lower()).strip("-_")
+    slug = re.sub(
+        r"[^\w-]+", "-", unicodedata.normalize("NFKC", note.stem).lower()
+    ).strip("-_")
     filename = args.filename or f"{slug}.md"
     if not slug or Path(filename).name != filename or not filename.endswith(".md"):
         raise ValueError("Provide a valid Markdown --filename, without directories")
@@ -303,7 +363,21 @@ def run(args):
         (staging / "archetypes").mkdir()
         (staging / "content").mkdir()
         shutil.copy2(site / "archetypes/default.md", staging / "archetypes/default.md")
-        subprocess.run(["hugo", "new", "content", dest_rel.as_posix(), "--kind", "default", "--source", str(staging)], check=True, capture_output=True, text=True)
+        subprocess.run(
+            [
+                "hugo",
+                "new",
+                "content",
+                dest_rel.as_posix(),
+                "--kind",
+                "default",
+                "--source",
+                str(staging),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         generated = (staging / "content" / dest_rel).read_text(encoding="utf-8")
     generated = apply_metadata(generated, overrides)
     created = []
@@ -331,13 +405,29 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("note", type=Path, help="Note path, absolute or relative to the vault (include .md)")
-    parser.add_argument("--directory", default="notes", help="Destination section under content (default: notes)")
+    parser.add_argument(
+        "note",
+        type=Path,
+        help="Note path, absolute or relative to the vault (include .md)",
+    )
+    parser.add_argument(
+        "--directory",
+        default="notes",
+        help="Destination section under content (default: notes)",
+    )
     parser.add_argument("--vault", type=Path, default=Path.home() / "obsidian_vault")
     parser.add_argument("--hugo-site", type=Path, default=Path.home() / "zalgorithm")
-    parser.add_argument("--content-dir", default="content", help="Content directory relative to site")
-    parser.add_argument("--filename", help="Override generated lowercase, hyphenated filename")
-    parser.add_argument("--dry-run", action="store_true", help="Validate and report without writing files")
+    parser.add_argument(
+        "--content-dir", default="content", help="Content directory relative to site"
+    )
+    parser.add_argument(
+        "--filename", help="Override generated lowercase, hyphenated filename"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and report without writing files",
+    )
     args = parser.parse_args()
     try:
         run(args)
