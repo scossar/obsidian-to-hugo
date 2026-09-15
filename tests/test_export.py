@@ -1,4 +1,6 @@
 import argparse
+from contextlib import redirect_stderr
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -50,6 +52,37 @@ tags: [obsidian]
         self.assertIn('![Title](/images/a%20picture.png "caption")', result)
         self.assertIn('[Go][ext]', result)
         self.assertTrue(any('dimensions' in w for w in self.export.warnings))
+
+    def test_wiki_links_use_target_slug_and_warn(self):
+        source = '---\ntags: []\n---\n[[Another note]] [[Another note|Display [text] here]]\n[[  Café & Tea!  ]]'
+        result = self.export.convert(source)
+        self.assertEqual(result, '[Another note](/another-note) [Display \\[text\\] here](/another-note)\n[  Café & Tea!  ](/café-tea)')
+        self.assertEqual(len(self.export.warnings), 3)
+        self.assertIn(':4:', self.export.warnings[0])
+        self.assertIn('[[Another note]] -> /another-note', self.export.warnings[0])
+        self.assertIn('verify the destination exists in Hugo and set its full path', self.export.warnings[0])
+        self.assertIn(':5:', self.export.warnings[2])
+
+    def test_wiki_links_in_code_comments_and_escaped_text_are_preserved(self):
+        source = '\\[[Another note]]\n`[[Another note]]`\n<!-- [[Another note]] -->\n    [[Another note]]\n```\n[[Another note]]\n```\n'
+        self.assertEqual(self.export.convert(source), source)
+        self.assertEqual(self.export.warnings, [])
+
+    def test_wiki_embeds_anchors_and_empty_slugs_still_warn(self):
+        source = '![[Another note]] [[Another note#Heading]] [[#^block]] [[!!!]]'
+        self.assertEqual(self.export.convert(source), source)
+        self.assertEqual(len(self.export.warnings), 4)
+
+    def test_wiki_link_warning_printed_during_dry_run(self):
+        (self.site / 'archetypes/default.md').write_text('+++\ndraft = true\n+++')
+        self.note.write_text('[[Another note]]')
+        args = argparse.Namespace(vault=self.vault, hugo_site=self.site, note=self.note,
+                                  filename=None, directory='notes', content_dir='content', dry_run=True)
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            run(args)
+        self.assertIn(f'WARNING: {self.note}:1: Internal wiki link converted:', stderr.getvalue())
+        self.assertIn('/another-note', stderr.getvalue())
 
     def test_linked_image(self):
         result = self.export.convert('[![Photo](<assets/a picture.png>)](https://example.com)')

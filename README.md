@@ -67,7 +67,14 @@ exporter project at `~/projects/obsidian-to-hugo`.
   archetype defaults. Invalid dates or non-string tags stop the export before writes.
   Dry runs show these overrides. Other Obsidian properties are not copied.
 - Preserves external Markdown links, reference links, bare URLs, and remote images.
-- Leaves internal wiki links, note embeds, relative Markdown links, and anchors
+- Converts internal wiki links such as `[[Another note]]` to
+  `[Another note](/another-note)`, using the same slugification as exported filenames.
+  Aliases keep their display text: `[[Another note|alias]]` becomes
+  `[alias](/another-note)`. Each conversion still prints a warning with its source
+  line number: verify the destination exists in Hugo and set its full path
+  (for example, `/notes/another-note` or `/posts/another-note`).
+- Leaves note embeds, wiki links with heading/block anchors or empty slugs,
+  relative Markdown links, and anchors
   unchanged; prints warnings with source line numbers to stderr. Review these
   before publishing. Internal reference definitions are also reported, including
   definitions retained after converting a reference image.

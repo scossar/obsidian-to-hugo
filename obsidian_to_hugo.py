@@ -170,6 +170,12 @@ def normalize(label):
     return " ".join(label.split()).casefold()
 
 
+def slugify(text):
+    return re.sub(
+        r"[^\w-]+", "-", unicodedata.normalize("NFKC", text).lower()
+    ).strip("-_")
+
+
 class Export:
     def __init__(self, vault, site, note):
         self.vault, self.site, self.note = vault, site, note
@@ -262,6 +268,20 @@ class Export:
                     edits.append((i, end + 2, f"![{alt}]({self.image(target)})"))
                     if sep and re.fullmatch(r"\d+(?:x\d+)?", alias):
                         self.warn(line, f"Obsidian image dimensions omitted: {alias}")
+                elif not embed and "#" not in target and slugify(target):
+                    label = alias if sep else target
+                    label = (
+                        label.replace("\\", "\\\\")
+                        .replace("[", "\\[")
+                        .replace("]", "\\]")
+                    )
+                    url = "/" + slugify(target)
+                    edits.append((i, end + 2, f"[{label}]({url})"))
+                    self.warn(
+                        line,
+                        f"Internal wiki link converted: {text[i : end + 2]} -> {url}; "
+                        "verify the destination exists in Hugo and set its full path",
+                    )
                 else:
                     self.warn(
                         line, f"Internal link/embed left unchanged: {text[i : end + 2]}"
@@ -329,9 +349,7 @@ def run(args):
         raise ValueError("Note must be a Markdown file inside the vault")
     if not (site / "archetypes/default.md").is_file():
         raise ValueError(f"Missing Hugo archetype: {site / 'archetypes/default.md'}")
-    slug = re.sub(
-        r"[^\w-]+", "-", unicodedata.normalize("NFKC", note.stem).lower()
-    ).strip("-_")
+    slug = slugify(note.stem)
     filename = args.filename or f"{slug}.md"
     if not slug or Path(filename).name != filename or not filename.endswith(".md"):
         raise ValueError("Provide a valid Markdown --filename, without directories")
