@@ -23,7 +23,35 @@ Defaults: vault `~/obsidian_vault`, Hugo site `~/zalgorithm`, destination
 the `.md` extension. Use `--vault`, `--hugo-site`, `--content-dir`, and `--filename`
 to override defaults. `--directory` is relative to the selected content directory.
 
-## Behavior
+## Fuzzy note picker
+
+The script at `scripts/obsidian-to-hugo-pick` adds a fuzzy note picker as a convenience. Move it to
+somewhere on your path (e.g.`~/bin`) and make it executable. E.g.:
+
+```bash
+install -m 755 scripts/obsidian-to-hugo-pick ~/bin/obsidian-to-hugo-pick
+```
+
+Then run from any directory:
+
+```bash
+obsidian-to-hugo-pick --directory notes --dry-run
+obsidian-to-hugo-pick --directory notes
+```
+
+Type part of a filename to filter, use the arrow keys to select, and press Enter.
+The preview shows the first 160 lines. Escape/Ctrl-C cancels without exporting.
+The picker includes Markdown notes in vault subdirectories, excluding hidden
+directories and the `assets` and `website_assets` trees. Filenames with spaces,
+quotes, and other special characters are passed safely to the exporter.
+
+All exporter options are forwarded, including `--vault`, `--hugo-site`,
+`--filename`, and `--dry-run`. Do not supply a positional note filename to the
+picker. `--vault` also changes the directory searched. Requires `fzf` and `rg`.
+The Bash launcher is installed at `~/bin/obsidian-to-hugo-pick` and runs the
+exporter project at `~/projects/obsidian-to-hugo`.
+
+## Export behavior
 
 - Replaces Obsidian YAML/TOML frontmatter with output from the site's actual
   `archetypes/default.md`, rendered by `hugo new content` in a temporary minimal

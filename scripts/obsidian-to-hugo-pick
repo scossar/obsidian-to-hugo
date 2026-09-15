@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Select one vault note, then forward the options to the existing exporter.
+set -euo pipefail
+
+project_dir="$HOME/projects/obsidian-to-hugo"
+vault_dir="$HOME/obsidian_vault"
+arguments=("$@")
+for ((i=0; i<${#arguments[@]}; i++)); do
+    case "${arguments[i]}" in
+        --vault)
+            if ((i + 1 >= ${#arguments[@]})); then
+                printf '%s\n' 'Error: --vault requires a directory.' >&2
+                exit 2
+            fi
+            i=$((i + 1))
+            vault_dir=${arguments[i]}
+            ;;
+        --vault=*) vault_dir=${arguments[i]#--vault=} ;;
+        -h|--help)
+            printf '%s\n' 'Usage: obsidian-to-hugo-pick [exporter options]' \
+                'Select a note with fzf. Enter selects; Escape cancels.' \
+                'Do not supply a note argument. Available exporter options:'
+            exec uv run --project "$project_dir" obsidian-to-hugo --help
+            ;;
+    esac
+done
+
+for dependency in fzf rg uv; do
+    if ! command -v "$dependency" >/dev/null; then
+        printf 'Error: %s is required.\n' "$dependency" >&2
+        exit 1
+    fi
+done
+# Match the exporter's expansion of a quoted ~/path.
+case "$vault_dir" in
+    '~') vault_dir=$HOME ;;
+    '~/'*) vault_dir="$HOME/${vault_dir:2}" ;;
+esac
+vault_dir=$(cd -- "$vault_dir" && pwd -P)
+
+picker_tmp=$(mktemp -d)
+trap 'rm -rf -- "$picker_tmp"' EXIT
+status=0
+(cd -- "$vault_dir" && rg --files --no-ignore --null \
+    -g '*.md' -g '!assets/**' -g '!website_assets/**') > "$picker_tmp/notes" || status=$?
+if ((status > 1)); then
+    exit "$status"
+fi
+if [[ ! -s "$picker_tmp/notes" ]]; then
+    printf 'No Markdown notes found in %s\n' "$vault_dir" >&2
+    exit 1
+fi
+
+status=0
+(cd -- "$vault_dir" && fzf --read0 --print0 --no-multi \
+    --prompt='Obsidian note > ' --layout=reverse --border \
+    --header='Enter: select note · Esc: cancel' \
+    --preview="sed -n '1,160p' -- {}" --preview-window='right:55%:wrap' \
+    < "$picker_tmp/notes" > "$picker_tmp/selected") || status=$?
+case "$status" in
+    0) ;;
+    1|130) printf '%s\n' 'Cancelled; no export performed.'; exit 0 ;;
+    *) exit "$status" ;;
+esac
+IFS= read -r -d '' selected < "$picker_tmp/selected"
+if [[ -z "$selected" ]]; then
+    exit 0
+fi
+uv run --project "$project_dir" obsidian-to-hugo "${arguments[@]}" -- "$vault_dir/$selected"
