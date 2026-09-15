@@ -4,7 +4,7 @@ import tempfile
 import unittest
 import tomllib
 
-from obsidian_to_hugo import Export, run
+from obsidian_to_hugo import Export, run, note_metadata, apply_metadata
 
 
 class ExportTests(unittest.TestCase):
@@ -73,7 +73,7 @@ tags: [obsidian]
     def test_actual_hugo_export_and_dry_run(self):
         archetype = Path.home() / 'zalgorithm/archetypes/default.md'
         (self.site / 'archetypes/default.md').write_text(archetype.read_text())
-        self.note.write_text('---\ntags: [old]\n---\n# Hello\n![[a picture.png]]\n')
+        self.note.write_text('---\ncreated_at: 2024-02-29\ntags: [old, nested/tag]\n---\n# Hello\n![[a picture.png]]\n')
         args = argparse.Namespace(vault=self.vault, hugo_site=self.site, note=self.note,
                                   filename=None, directory='notes', content_dir='content', dry_run=True)
         run(args)
@@ -87,6 +87,9 @@ tags: [obsidian]
         self.assertTrue(metadata['draft'])
         self.assertEqual(metadata['title'], 'A Note')
         self.assertEqual(len(metadata['id']), 32)
+        self.assertEqual(metadata['date'], '2024-02-29')
+        self.assertEqual(metadata['tags'], ['old', 'nested/tag'])
+        self.assertIn('date = "2024-02-29"', text)
         self.assertIn('![a picture](/images/a%20picture.png)', text)
         self.assertEqual((self.site / 'static/images/a picture.png').read_bytes(), b'image')
         with self.assertRaisesRegex(ValueError, 'existing post'):
@@ -99,6 +102,73 @@ tags: [obsidian]
                                   filename=None, directory='../outside', content_dir='content', dry_run=True)
         with self.assertRaisesRegex(ValueError, 'relative path'):
             run(args)
+
+    def test_invalid_metadata_dry_run_writes_nothing(self):
+        (self.site / 'archetypes/default.md').write_text('+++\ndraft = true\n+++')
+        self.note.write_text('---\ncreated_at: "2024-02-30"\n---\nhello')
+        args = argparse.Namespace(vault=self.vault, hugo_site=self.site, note=self.note,
+                                  filename=None, directory='notes', content_dir='content', dry_run=True)
+        with self.assertRaisesRegex(ValueError, 'created_at'):
+            run(args)
+        self.assertFalse((self.site / 'content').exists())
+        self.assertFalse((self.site / 'static').exists())
+
+
+class MetadataTests(unittest.TestCase):
+    def test_date_formats(self):
+        for value in ['2024-02-29', '"2024-02-29"', '2024-02-29T23:45:00-08:00',
+                      '"2024-02-29T23:45:00-08:00"']:
+            with self.subTest(value=value):
+                self.assertEqual(note_metadata(f'---\ncreated_at: {value}\n---\n'), {'date': '2024-02-29'})
+
+    def test_tag_styles(self):
+        for value in ['[one, nested/tag]', '\n  - one\n  - nested/tag']:
+            self.assertEqual(note_metadata(f'---\ntags: {value}\n---\n'), {'tags': ['one', 'nested/tag']})
+        self.assertEqual(note_metadata('---\ntags: one\n---\n'), {'tags': ['one']})
+        self.assertEqual(note_metadata('---\ntags: []\n---\n'), {'tags': []})
+
+    def test_absent_and_null(self):
+        for text in ['Body', '---\n---\nBody', '---\ntitle: Hello\n---\n',
+                     '---\ncreated_at: null\ntags: null\n---\n']:
+            self.assertEqual(note_metadata(text), {})
+        original = '+++\ndate = "original"\ntags = ["default"]\n+++\n'
+        self.assertEqual(apply_metadata(original, {}), original)
+
+    def test_toml_note(self):
+        self.assertEqual(note_metadata('+++\ncreated_at = 2024-02-29\ntags = ["a"]\n+++\n'),
+                         {'date': '2024-02-29', 'tags': ['a']})
+
+    def test_escaping_and_archetype_preservation(self):
+        original = '''+++
+date = "original" # keep comment
+draft = true
+summary = """
+date = "inside summary"
+"""
+tags = [
+  "default",
+]
+[params]
+date = "nested"
++++
+Archetype body
+'''
+        tags = ['quote"tag', 'back\\slash', 'café', 'line\nbreak']
+        result = apply_metadata(original, {'date': '2024-02-29', 'tags': tags})
+        metadata = tomllib.loads(result.split('+++')[1])
+        self.assertEqual(metadata['tags'], tags)
+        self.assertEqual(metadata['date'], '2024-02-29')
+        self.assertEqual(metadata['params']['date'], 'nested')
+        self.assertIn('date = "inside summary"', metadata['summary'])
+        self.assertIn('# keep comment', result)
+        self.assertTrue(result.endswith('Archetype body\n'))
+
+    def test_invalid_values(self):
+        for raw in ['created_at: "2024-02-30"', 'created_at: 123',
+                    'created_at: "2024-2-9"', 'tags: [one, 123]',
+                    'tags: {one: two}', 'tags: [unterminated', '- item']:
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                note_metadata(f'---\n{raw}\n---\n')
 
 
 if __name__ == '__main__':

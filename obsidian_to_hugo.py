@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, datetime
 import filecmp
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unicodedata
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
+
+import tomlkit
+import yaml
 
 IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".bmp", ".ico", ".tif", ".tiff"}
 
@@ -28,6 +34,62 @@ def strip_frontmatter(text):
                 return "".join(lines[i + 1:]), i + 1
         raise ValueError("Unterminated note frontmatter")
     return "".join(lines), 0
+
+
+def note_metadata(text):
+    """Read only frontmatter; return validated overrides for Hugo."""
+    _, offset = strip_frontmatter(text)
+    if not offset:
+        return {}
+    lines = text.lstrip("\ufeff").splitlines(keepends=True)
+    raw = "".join(lines[1:offset - 1])
+    try:
+        metadata = tomllib.loads(raw) if lines[0].strip() == "+++" else yaml.safe_load(raw)
+    except (ValueError, yaml.YAMLError) as error:
+        raise ValueError(f"Invalid note frontmatter: {error}") from error
+    if metadata is None:
+        return {}
+    if not isinstance(metadata, dict):
+        raise ValueError("Note frontmatter must contain a mapping of properties")
+    overrides = {}
+    created = metadata.get("created_at")
+    if created is not None:
+        try:
+            if isinstance(created, datetime):
+                created = created.date()
+            elif isinstance(created, str):
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", created):
+                    created = date.fromisoformat(created)
+                elif re.match(r"^\d{4}-\d{2}-\d{2}[Tt ]", created):
+                    created = datetime.fromisoformat(created).date()
+                else:
+                    raise ValueError("Expected ISO date or timestamp")
+            if not isinstance(created, date):
+                raise ValueError("Expected a date")
+        except ValueError as error:
+            raise ValueError("created_at must be a valid YYYY-MM-DD date or ISO timestamp") from error
+        overrides["date"] = created.isoformat()
+    tags = metadata.get("tags")
+    if tags is not None:
+        if isinstance(tags, str):
+            tags = [tags]
+        if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+            raise ValueError("tags must be a list of strings or a single string")
+        overrides["tags"] = tags
+    return overrides
+
+
+def apply_metadata(generated, overrides):
+    if not overrides:
+        return generated
+    body, offset = strip_frontmatter(generated)
+    lines = generated.lstrip("\ufeff").splitlines(keepends=True)
+    if not offset or lines[0].strip() != "+++":
+        raise ValueError("Metadata overrides require TOML (+++) Hugo archetype frontmatter")
+    document = tomlkit.parse("".join(lines[1:offset - 1]))
+    for key, value in overrides.items():
+        document[key] = tomlkit.string(value) if isinstance(value, str) else value
+    return "+++\n" + tomlkit.dumps(document).rstrip("\n") + "\n+++\n" + body
 
 
 def protected(text):
@@ -221,10 +283,14 @@ def run(args):
     if dest.exists():
         raise ValueError(f"Refusing to overwrite existing post: {dest}")
     export = Export(vault, site, note)
-    body = export.convert(note.read_text(encoding="utf-8"))
+    original = note.read_text(encoding="utf-8")
+    overrides = note_metadata(original)
+    body = export.convert(original)
     for warning in export.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
     print(f"{'Would create' if args.dry_run else 'Creating'}: {dest}")
+    for key, value in overrides.items():
+        print(f"Frontmatter: {key} = {json.dumps(value, ensure_ascii=False)}")
     for target, source in export.copies.items():
         print(f"{'Reuse' if target.exists() else 'Copy'}: {source} -> {target}")
     if args.dry_run:
@@ -239,6 +305,7 @@ def run(args):
         shutil.copy2(site / "archetypes/default.md", staging / "archetypes/default.md")
         subprocess.run(["hugo", "new", "content", dest_rel.as_posix(), "--kind", "default", "--source", str(staging)], check=True, capture_output=True, text=True)
         generated = (staging / "content" / dest_rel).read_text(encoding="utf-8")
+    generated = apply_metadata(generated, overrides)
     created = []
     try:
         for target, source in export.copies.items():

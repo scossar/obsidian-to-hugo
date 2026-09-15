@@ -3,7 +3,7 @@ name = "obsidian-to-hugo"
 version = "0.1.0"
 description = "Export an Obsidian note and its images to Hugo"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["PyYAML>=6.0.2,<7", "tomlkit>=0.13.2,<1"]
 
 [project.scripts]
 obsidian-to-hugo = "obsidian_to_hugo:main"

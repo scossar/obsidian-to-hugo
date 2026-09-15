@@ -1,7 +1,8 @@
 # Obsidian to Hugo
 
 Export one explicitly selected Markdown note to Hugo, preserving your vault source.
-Requires Python 3.11+, uv, and `hugo` on PATH. No runtime Python dependencies.
+Requires Python 3.11+, uv, and `hugo` on PATH. uv installs the PyYAML and TOML Kit
+dependencies automatically.
 
 ```bash
 uv run --project ~/projects/obsidian-to-hugo obsidian-to-hugo \
@@ -15,7 +16,7 @@ uv run --project ~/projects/obsidian-to-hugo obsidian-to-hugo \
 standalone script without installing a package:
 
 ```bash
-uv run ~/projects/obsidian-to-hugo/obsidian_to_hugo.py "My note.md" --directory notes
+uv run --with PyYAML --with tomlkit ~/projects/obsidian-to-hugo/obsidian_to_hugo.py "My note.md" --directory notes
 ```
 
 Defaults: vault `~/obsidian_vault`, Hugo site `~/zalgorithm`, destination
@@ -55,8 +56,16 @@ exporter project at `~/projects/obsidian-to-hugo`.
 
 - Replaces Obsidian YAML/TOML frontmatter with output from the site's actual
   `archetypes/default.md`, rendered by `hugo new content` in a temporary minimal
-  site. Your current date, ID, draft, title, summary, and tags template is preserved.
+  site. The archetype supplies the default frontmatter.
   The title comes from the destination filename, as with your usual Hugo command.
+- Copies `created_at` into Hugo's `date` as a quoted `"YYYY-MM-DD"` string.
+  Accepts quoted/unquoted ISO dates and timestamps; timestamps use their written
+  calendar date without timezone conversion.
+- Copies frontmatter `tags` into Hugo's string array, supporting YAML block lists,
+  inline lists, and a single string (one tag). Tag spelling and order are preserved.
+  An explicit `[]` clears the archetype tags. Missing or null properties keep the
+  archetype defaults. Invalid dates or non-string tags stop the export before writes.
+  Dry runs show these overrides. Other Obsidian properties are not copied.
 - Preserves external Markdown links, reference links, bare URLs, and remote images.
 - Leaves internal wiki links, note embeds, relative Markdown links, and anchors
   unchanged; prints warnings with source line numbers to stderr. Review these
@@ -82,7 +91,7 @@ temporary-site rendering strategy extended; the current default archetype does n
 ## Development
 
 ```bash
-python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
 The integration test runs the installed Hugo against a temporary site using
