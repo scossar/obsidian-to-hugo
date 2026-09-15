@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import tomllib
 
 from obsidian_to_hugo import Export, run, note_metadata, apply_metadata
@@ -125,8 +126,27 @@ tags: [obsidian]
         self.assertIn('date = "2024-02-29"', text)
         self.assertIn('![a picture](/images/a%20picture.png)', text)
         self.assertEqual((self.site / 'static/images/a picture.png').read_bytes(), b'image')
-        with self.assertRaisesRegex(ValueError, 'existing post'):
+        with patch('builtins.input', return_value=''):
             run(args)
+        self.assertEqual(dest.read_text(), text)
+        self.note.write_text('Updated body\n')
+        args.dry_run = True
+        with patch('builtins.input', side_effect=AssertionError('Dry run prompted')):
+            run(args)
+        self.assertEqual(dest.read_text(), text)
+        args.dry_run = False
+        with patch('builtins.input', side_effect=EOFError):
+            run(args)
+        self.assertEqual(dest.read_text(), text)
+        with patch('builtins.input', return_value='yes'), patch('pathlib.Path.replace', side_effect=OSError('Failed replacement')):
+            with self.assertRaisesRegex(OSError, 'Failed replacement'):
+                run(args)
+        self.assertEqual(dest.read_text(), text)
+        self.assertEqual(list(dest.parent.iterdir()), [dest])
+        with patch('builtins.input', return_value='yes'):
+            run(args)
+        self.assertIn('Updated body', dest.read_text())
+        self.assertNotIn('# Hello', dest.read_text())
 
     def test_path_escape(self):
         (self.site / 'archetypes/default.md').write_text('+++\ndraft = true\n+++')

@@ -358,21 +358,29 @@ def run(args):
     dest = (content / dest_rel).resolve()
     if not content.is_relative_to(site) or not dest.is_relative_to(content):
         raise ValueError("Destination must stay inside the Hugo content directory")
-    if dest.exists():
-        raise ValueError(f"Refusing to overwrite existing post: {dest}")
+    existing = dest.read_bytes() if dest.exists() else None
     export = Export(vault, site, note)
     original = note.read_text(encoding="utf-8")
     overrides = note_metadata(original)
     body = export.convert(original)
     for warning in export.warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
-    print(f"{'Would create' if args.dry_run else 'Creating'}: {dest}")
+    action = 'overwrite' if existing is not None else 'create'
+    print(f"{'Would ' if args.dry_run else 'Will '}{action}: {dest}")
     for key, value in overrides.items():
         print(f"Frontmatter: {key} = {json.dumps(value, ensure_ascii=False)}")
     for target, source in export.copies.items():
         print(f"{'Reuse' if target.exists() else 'Copy'}: {source} -> {target}")
     if args.dry_run:
         return
+    if existing is not None:
+        try:
+            answer = input(f"Overwrite existing post {dest}? [y/N] ")
+        except (EOFError, KeyboardInterrupt):
+            answer = ''
+        if answer.strip().lower() not in {'y', 'yes'}:
+            print('Cancelled; no export performed.')
+            return
     # A minimal temporary site renders the actual default archetype with Hugo,
     # avoiding theme/build side effects and leaving the destination untouched on failure.
     with tempfile.TemporaryDirectory(prefix="obsidian-to-hugo-") as directory:
@@ -411,14 +419,28 @@ def run(args):
                 with source.open("rb") as image:
                     shutil.copyfileobj(image, output)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with dest.open("x", encoding="utf-8") as output:
-            created.append(dest)
-            output.write(generated.rstrip() + "\n\n" + body.lstrip("\n"))
+        rendered = generated.rstrip() + "\n\n" + body.lstrip("\n")
+        if existing is None:
+            with dest.open("x", encoding="utf-8") as output:
+                created.append(dest)
+                output.write(rendered)
+        else:
+            # Prepare the entire replacement before touching the existing post.
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                             dir=dest.parent, delete=False) as output:
+                replacement = Path(output.name)
+                created.append(replacement)
+                output.write(rendered)
+            replacement.chmod(dest.stat().st_mode)
+            if dest.read_bytes() != existing:
+                raise ValueError(f"Post changed during export; refusing to overwrite: {dest}")
+            replacement.replace(dest)
+            created.remove(replacement)
     except BaseException:
         for path in reversed(created):
             path.unlink()
         raise
-    print(f"Created: {dest} ({len(export.warnings)} warning(s))")
+    print(f"{'Overwritten' if existing is not None else 'Created'}: {dest} ({len(export.warnings)} warning(s))")
 
 
 def main():

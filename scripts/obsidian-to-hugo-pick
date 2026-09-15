@@ -19,6 +19,7 @@ for ((i=0; i<${#arguments[@]}; i++)); do
         -h|--help)
             printf '%s\n' 'Usage: obsidian-to-hugo-pick [exporter options]' \
                 'Select a note with fzf. Enter selects; Escape cancels.' \
+                'After selection, enter additional exporter options (Enter keeps current options).' \
                 'Do not supply a note argument. Available exporter options:'
             exec uv run --project "$project_dir" obsidian-to-hugo --help
             ;;
@@ -66,4 +67,20 @@ IFS= read -r -d '' selected < "$picker_tmp/selected"
 if [[ -z "$selected" ]]; then
     exit 0
 fi
-uv run --project "$project_dir" obsidian-to-hugo "${arguments[@]}" -- "$vault_dir/$selected"
+printf 'Selected: %s\n' "$selected"
+if ! IFS= read -e -r -p 'Additional flags (Enter to continue, Ctrl-C to cancel): ' extra_flags; then
+    printf '\n%s\n' 'Cancelled; no export performed.'
+    exit 0
+fi
+# Parse shell-style quoting without executing shell substitutions or commands.
+uv run --project "$project_dir" python -c '
+import shlex, sys
+try:
+    arguments = shlex.split(sys.argv[1])
+except ValueError as error:
+    sys.exit(f"Invalid flags: {error}")
+for argument in arguments:
+    sys.stdout.buffer.write(argument.encode() + b"\0")
+' "$extra_flags" > "$picker_tmp/flags"
+mapfile -d '' -t extra_arguments < "$picker_tmp/flags"
+uv run --project "$project_dir" obsidian-to-hugo "${arguments[@]}" "${extra_arguments[@]}" -- "$vault_dir/$selected"

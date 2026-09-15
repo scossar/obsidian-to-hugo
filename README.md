@@ -41,6 +41,11 @@ obsidian-to-hugo-pick --directory notes
 ```
 
 Type part of a filename to filter, use the arrow keys to select, and press Enter.
+Then enter additional flags, such as `--directory "notes" --dry-run`, or press
+Enter again to continue with the options already supplied. Quoted values are
+supported; shell commands and variable substitutions are not executed. Options
+entered after selection override earlier values for the same option. Ctrl-C or
+end-of-input at the flags prompt cancels the export.
 The preview shows the first 160 lines. Escape/Ctrl-C cancels without exporting.
 The picker includes Markdown notes in vault subdirectories, excluding hidden
 directories and the `assets` and `website_assets` trees. Filenames with spaces,
@@ -48,7 +53,8 @@ quotes, and other special characters are passed safely to the exporter.
 
 All exporter options are forwarded, including `--vault`, `--hugo-site`,
 `--filename`, and `--dry-run`. Do not supply a positional note filename to the
-picker. `--vault` also changes the directory searched. Requires `fzf` and `rg`.
+picker. Supply `--vault` before opening the picker to change the directory searched.
+Requires `fzf` and `rg`.
 The Bash launcher is installed at `~/bin/obsidian-to-hugo-pick` and runs the
 exporter project at `~/projects/obsidian-to-hugo`.
 
@@ -85,9 +91,15 @@ exporter project at `~/projects/obsidian-to-hugo`.
   Spaces and URL-sensitive characters are percent-encoded in image URLs.
 - Obsidian image dimensions such as `|300x200` are omitted with a warning.
 - Ignores fenced/indented code, inline code, and HTML comments during conversion.
-- Refuses existing posts, missing/ambiguous images, and conflicting image filenames.
+- Existing posts require confirmation: only `y` or `yes` allows replacement;
+  Enter, end-of-input, or any other answer cancels without writing. The prompt
+  applies to both the picker and direct exporter. Replacement regenerates the
+  entire post, including frontmatter, from the note and archetype. The old post
+  remains intact if preparing or writing its replacement fails.
+- Refuses missing/ambiguous images and conflicting image filenames.
   Existing byte-identical images are reused. `--dry-run` validates and reports
-  without writing. Failed writes roll back newly created files.
+  without writing, including planned post overwrites, and does not prompt for
+  confirmation. Failed writes roll back newly created files.
 
 This is a conservative Markdown converter, not a complete Obsidian renderer.
 Raw HTML links/images, callouts, plugin syntax, and non-image attachments are not
